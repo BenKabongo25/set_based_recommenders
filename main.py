@@ -43,7 +43,7 @@ def main(config):
 
     rankings = recommender.rank_all(
         users=users,
-        candidate_items=[list(candidate_items[i].keys()) for i in range(len(candidate_items))],
+        items=[list(candidate_items[i].keys()) for i in range(len(candidate_items))],
     )
 
     MAP = calculate_map(
@@ -146,13 +146,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--use_pairwise_tags",
-        type=argparse.BooleanOptionalAction,
+        action=argparse.BooleanOptionalAction,
         default=True,
         help="Whether to use pairwise tags in the recommender.",
     )
     parser.add_argument(
         "--use_item_priors",
-        type=argparse.BooleanOptionalAction,
+        action=argparse.BooleanOptionalAction,
         default=True,
         help="Whether to use item priors in the recommender.",
     )

@@ -6,8 +6,8 @@ import numpy as np
 from tqdm import tqdm
 from typing import Dict, List, Union
 
-from .item_model import ItemModel
-from .user_model import UserModel
+from item_model import ItemModel
+from user_model import UserModel
 
 
 class TagBaseRecommender:
@@ -123,10 +123,14 @@ class TagBaseRecommender:
         """
         Fit the recommender system by computing user and item models.
         """
-        for user_model in tqdm(self.user_models.values(), desc="Fitting user models"):
+        for user_model in tqdm(
+            self.user_models.values(), 
+            desc="Fitting user models", total=len(self.user_models)):
             user_model.fit()
 
-        for item_model in tqdm(self.item_models.values(), desc="Fitting item models"):
+        for item_model in tqdm(
+            self.item_models.values(), 
+            desc="Fitting item models", total=len(self.item_models)):
             item_model.fit()
 
         self.n_users = len(self.user_models)
@@ -255,6 +259,8 @@ class TagBaseRecommender:
             List[List[Union[str, int]]]: Ranked list of item IDs for each user.
         """
         ranked_items = []
-        for user_id, user_items in tqdm(zip(users, items), desc="Ranking"):
+        for user_id, user_items in tqdm(
+            zip(users, items), 
+            desc="Ranking", total=len(users)):
             ranked_items.append(self.rank(user_id, user_items))
         return ranked_items
