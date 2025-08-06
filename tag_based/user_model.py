@@ -7,14 +7,43 @@ from typing import List, Union
 
 
 class UserModel:
+    """
+    UserModel represents a user in the Tag-Based Recommender System.
+
+    Attributes:
+        user_id (Union[str, int]): The ID of the user.
+        neutral_rating (float): The neutral rating value.
+        use_pairwise_tags (bool): Whether to use pairwise tags in the model.
+        item_ratings (dict): Dictionary mapping item IDs to ratings given by the user.
+        tag_interaction_ratings (dict): Dictionary mapping tag IDs to another dictionary of item IDs and their ratings.
+        tag_weights (dict): Dictionary mapping tag IDs to their weights.
+        tag_ratings (dict): Dictionary mapping tag IDs to their average ratings.
+        tag_coverages (dict): Dictionary mapping tag IDs to their coverage values.
+        tag_significances (dict): Dictionary mapping tag IDs to their significance values.
+        tag_utilies (dict): Dictionary mapping tag IDs to their utility values.
+        pairwise_tag_weights (dict): Dictionary mapping pairs of tag IDs to their pairwise weights.
+        pairwise_tag_ratings (dict): Dictionary mapping pairs of tag IDs to their pairwise ratings.
+        pairwise_tag_coverages (dict): Dictionary mapping pairs of tag IDs to their pairwise coverages.
+        pairwise_tag_significances (dict): Dictionary mapping pairs of tag IDs to their pairwise significances.
+        pairwise_tag_utilies (dict): Dictionary mapping pairs of tag IDs to their pairwise utilities.
+
+    Functions:
+        add_interaction(
+        item_id: Union[str, int], rating: float, tags: List[Union[str, int]] = None, tag_ratings: Union[None, List[float]] = None) -> None:
+            Add an interaction for the user with an item, including optional tags and tag ratings.
+        fit() -> None:
+            Fit the user model by computing tag ratings, weights, coverages, significances, and utilities.
+    """
 
     def __init__(
         self,
         user_id: Union[str, int],
         neutral_rating: float = 0.0,
+        use_pairwise_tags: bool = True,
     ) -> None:
         self.user_id = user_id
         self.neutral_rating = neutral_rating
+        self.use_pairwise_tags = use_pairwise_tags
         
         self.item_ratings = {} # item_id: rating
         self.tag_interaction_ratings = {}  # tag_id: {item_id: tag/item rating}
@@ -122,6 +151,9 @@ class UserModel:
             self.tag_significances[tag_a] = tag_significance_a
             self.tag_utilies[tag_a] = tag_utility_a
 
+            if not self.use_pairwise_tags:
+                continue
+
             for tag_b, tag_interaction_ratings_b in self.tag_interaction_ratings.items():
                 if tag_a == tag_b:
                     continue
@@ -147,5 +179,3 @@ class UserModel:
                 self.pairwise_tag_coverages[(tag_a, tag_b)] = pairwise_coverage
                 self.pairwise_tag_significances[(tag_a, tag_b)] = pairwise_significance
                 self.pairwise_tag_utilies[(tag_a, tag_b)] = pairwise_utility
-
-    
