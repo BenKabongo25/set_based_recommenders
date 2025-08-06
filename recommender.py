@@ -3,6 +3,7 @@
 
 
 import numpy as np
+from tqdm import tqdm
 from typing import Dict, List, Union
 
 from .item_model import ItemModel
@@ -10,6 +11,34 @@ from .user_model import UserModel
 
 
 class TagBaseRecommender:
+    """
+    Tag-based Recommender.
+
+    Attributes:
+        user_models (Dict[Union[str, int], UserModel]): Dictionary mapping user IDs to UserModel instances.
+        item_models (Dict[Union[str, int], ItemModel]): Dictionary mapping item IDs to ItemModel instances.
+        n_users (int): Number of users in the recommender system.
+        n_items (int): Number of items in the recommender system.
+        mu (float): Regularization parameter for tag scores.
+        neutral_rating (float): Neutral rating value used for initialization.
+        use_pairwise_tags (bool): Whether to use pairwise tags in scoring.
+        use_item_priors (bool): Whether to use item priors in scoring.
+        tag_items (Dict[Union[str, int], set]): Dictionary mapping tag IDs to sets of item IDs rated with that tag.
+        n_tag_items (Dict[Union[str, int], int]): Dictionary mapping tag IDs to the number of items rated with that tag.
+        n_pairwise_tag_items (Dict[tuple, int]): Dictionary mapping pairs of tag IDs to the number of items rated with both tags.
+
+    Functions:
+        add_interaction(user_id, item_id, rating, tags=None, tag_ratings=None):
+            Add an interaction (user-item rating) to the recommender system.
+        add_interactions(users, items, ratings, tags=None, tag_ratings=None):
+            Add multiple interactions to the recommender system.
+        fit():
+            Fit the recommender system by computing user and item models.
+        rank(user_id, items):
+            Rank items for a given user based on the learned models.
+        rank_all(users, items):
+            Rank items for multiple users.
+    """
 
     def __init__(
         self,
@@ -69,14 +98,35 @@ class TagBaseRecommender:
                 self.tag_items[tag] = set()
             self.tag_items[tag].add(item_id)
 
+    def add_interactions(
+        self,
+        users: List[Union[str, int]],
+        items: List[Union[str, int]],
+        ratings: List[float],
+        tags: List[List[Union[str, int]]] = None,
+        tag_ratings: Union[None, List[List[float]]] = None
+    ) -> None:
+        """
+        Add multiple interactions to the recommender system.
+
+        Args:
+            users (List[Union[str, int]]): List of user IDs.
+            items (List[Union[str, int]]): List of item IDs.
+            ratings (List[float]): List of ratings corresponding to each user-item pair.
+            tags (List[List[Union[str, int]]], optional): List of lists of tags for each item. Defaults to None.
+            tag_ratings (Union[None, List[List[float]]], optional): List of lists of tag ratings for each item. Defaults to None.
+        """
+        for user_id, item_id, rating, item_tags, item_tag_ratings in zip(users, items, ratings, tags or [], tag_ratings or []):
+            self.add_interaction(user_id, item_id, rating, item_tags, item_tag_ratings)
+
     def fit(self) -> None:
         """
         Fit the recommender system by computing user and item models.
         """
-        for user_model in self.user_models.values():
+        for user_model in tqdm(self.user_models.values(), desc="Fitting user models"):
             user_model.fit()
 
-        for item_model in self.item_models.values():
+        for item_model in tqdm(self.item_models.values(), desc="Fitting item models"):
             item_model.fit()
 
         self.n_users = len(self.user_models)
@@ -187,4 +237,24 @@ class TagBaseRecommender:
             item_scores[item_id] = score
 
         ranked_items = sorted(item_scores, key=item_scores.get, reverse=True)
+        return ranked_items
+    
+    def rank_all(
+        self,
+        users: List[Union[str, int]],
+        items: List[List[Union[str, int]]]
+    ) -> List[List[Union[str, int]]]:
+        """
+        Rank items for multiple users.
+
+        Args:
+            users (List[Union[str, int]]): List of user IDs.
+            items (List[List[Union[str, int]]]): List of lists of item IDs for each user.
+
+        Returns:
+            List[List[Union[str, int]]]: Ranked list of item IDs for each user.
+        """
+        ranked_items = []
+        for user_id, user_items in tqdm(zip(users, items), desc="Ranking"):
+            ranked_items.append(self.rank(user_id, user_items))
         return ranked_items
