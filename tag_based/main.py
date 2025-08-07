@@ -4,10 +4,12 @@
 
 import argparse
 import ast
+import json
+import os
 import pandas as pd
 
 from recommender import TagBaseRecommender
-from utils import *
+from utils import normalize_overall_rating, evaluate_ranking_metrics
 
 
 def main(config):
@@ -29,92 +31,45 @@ def main(config):
     )
     recommender.fit()
 
-    users = []
-    candidate_items = []
+    data_df = pd.concat([train_df, test_df], ignore_index=True)
+    all_items = data_df[config.item_column].unique().tolist()
 
-    grouped_test_df = test_df.groupby(config.user_column)
-    for user_id, user_df in grouped_test_df:
+    users = []
+    item_relevances = []
+
+    grouped_df = data_df.groupby(config.user_column)
+    for user_id, user_df in grouped_df:
         items = user_df[config.item_column].tolist()
         ratings = user_df[config.rating_column].apply(lambda x: normalize_overall_rating(x)).tolist()
         items_ratings = {item: rating for item, rating in zip(items, ratings)}
 
         users.append(user_id)
-        candidate_items.append(items_ratings)
+        item_relevances.append(items_ratings)
 
     rankings = recommender.rank_all(
         users=users,
-        items=[list(candidate_items[i].keys()) for i in range(len(candidate_items))],
+        items=[all_items] * len(users),
     )
 
-    MAP = calculate_map(
+    test_scores = evaluate_ranking_metrics(
         users=users,
         rankings=rankings,
-        candidate_items=candidate_items,
+        item_relevances=item_relevances,
         neutral_rating=config.neutral_rating,
+        ks=[5, 10, 20],
     )
-    print(f"Mean Average Precision (MAP): {MAP:.4f}")
+    print("Evaluation Results:")
+    for metric, score in test_scores.items():
+        print(f"{metric}: {score:.4f}")
 
-    MRR = calculate_mrr(
-        users=users,
-        rankings=rankings,
-        candidate_items=candidate_items,
-        neutral_rating=config.neutral_rating,
-    )
-    print(f"Mean Reciprocal Rank (MRR): {MRR:.4f}")
+    os.makedirs(config.output_dir, exist_ok=True)
+    config_path = f"{config.output_dir}/config.json"
+    with open(config_path, "w") as f:
+        json.dump(vars(config), f, indent=4)
 
-    NDCG_at_5 = calculate_ndcg(
-        users=users,
-        rankings=rankings,
-        candidate_items=candidate_items,
-        neutral_rating=config.neutral_rating,
-        k=5,
-    )
-    print(f"NDCG@5: {NDCG_at_5:.4f}")
-
-    NDCG_at_10 = calculate_ndcg(
-        users=users,
-        rankings=rankings,
-        candidate_items=candidate_items,
-        neutral_rating=config.neutral_rating,
-        k=10,
-    )
-    print(f"NDCG@10: {NDCG_at_10:.4f}")
-
-    NDCG_at_20 = calculate_ndcg(
-        users=users,
-        rankings=rankings,
-        candidate_items=candidate_items,
-        neutral_rating=config.neutral_rating,
-        k=20,
-    )
-    print(f"NDCG@20: {NDCG_at_20:.4f}")
-
-    HR_at_5 = hit_ratio_at_k(
-        users=users,
-        rankings=rankings,
-        candidate_items=candidate_items,
-        neutral_rating=config.neutral_rating,
-        k=5,
-    )
-    print(f"Hit Rate@5: {HR_at_5:.4f}")
-
-    HR_at_10 = hit_ratio_at_k(
-        users=users,
-        rankings=rankings,
-        candidate_items=candidate_items,
-        neutral_rating=config.neutral_rating,
-        k=10,
-    )
-    print(f"Hit Rate@10: {HR_at_10:.4f}")
-
-    HR_at_20 = hit_ratio_at_k(
-        users=users,
-        rankings=rankings,
-        candidate_items=candidate_items,
-        neutral_rating=config.neutral_rating,
-        k=20,
-    )
-    print(f"Hit Rate@20: {HR_at_20:.4f}")
+    res_path = f"{config.output_dir}/results.json"
+    with open(res_path, "w") as f:
+        json.dump(test_scores, f, indent=4)
 
 
 if __name__ == "__main__":
@@ -130,6 +85,12 @@ if __name__ == "__main__":
         type=str,
         required=True,
         help="Path to the test data file.",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=".",
+        help="Directory to save the output results.",
     )
 
     parser.add_argument(
