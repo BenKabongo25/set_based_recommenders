@@ -33,7 +33,6 @@ def evaluate_ranking_metrics(
     users: List[Union[str, int]],
     rankings: List[List[Union[str, int]]],
     item_relevances: List[Dict[Union[str, int], float]],
-    neutral_rating: float = 0.0,
     ks: List[int] = [5, 10, 20],
 ) -> Dict[str, float]:
     """
@@ -43,7 +42,6 @@ def evaluate_ranking_metrics(
         users: List of user IDs.
         rankings: Ranked items for each user.
         item_relevances: Relevance scores per user.
-        neutral_rating: Minimum score to consider an item relevant.
         ks: List of cutoff ranks for top-k metrics.
 
     Returns:
@@ -52,15 +50,15 @@ def evaluate_ranking_metrics(
     results = {}
 
     # Global metrics
-    results['MAP'] = calculate_map(users, rankings, item_relevances, neutral_rating)
-    results['MRR'] = calculate_mrr(users, rankings, item_relevances, neutral_rating)
+    results['MAP'] = calculate_map(users, rankings, item_relevances)
+    results['MRR'] = calculate_mrr(users, rankings, item_relevances)
 
     # Top-k metrics
     for k in ks:
-        recall = recall_at_k(users, rankings, item_relevances, neutral_rating, k)
-        precision = precision_at_k(users, rankings, item_relevances, neutral_rating, k)
-        ndcg = calculate_ndcg(users, rankings, item_relevances, neutral_rating, k)
-        hit = hit_ratio_at_k(users, rankings, item_relevances, neutral_rating, k)
+        recall = recall_at_k(users, rankings, item_relevances, k)
+        precision = precision_at_k(users, rankings, item_relevances, k)
+        ndcg = calculate_ndcg(users, rankings, item_relevances, k)
+        hit = hit_ratio_at_k(users, rankings, item_relevances, k)
 
         results[f'Recall@{k}'] = recall
         results[f'Precision@{k}'] = precision
@@ -72,8 +70,7 @@ def evaluate_ranking_metrics(
 
 def average_precision(
     ranked_items: List[Union[str, int]],
-    item_relevance: Dict[Union[str, int], float],
-    neutral_rating: float = 0.0,
+    item_relevance: Dict[Union[str, int], float]
 ) -> float:
     """
     Compute Average Precision (AP) for a single user.
@@ -81,7 +78,6 @@ def average_precision(
     Args:
         ranked_items: List of ranked item IDs.
         item_relevance: Dictionary mapping item IDs to relevance scores.
-        neutral_rating: Threshold above which items are considered relevant.
 
     Returns:
         float: Average Precision.
@@ -90,7 +86,7 @@ def average_precision(
     precisions = []
 
     for i, item in enumerate(ranked_items, start=1):
-        if item_relevance.get(item, -1) > neutral_rating:
+        if item_relevance.get(item, 0) > 0:
             num_relevant += 1
             precisions.append(num_relevant / i)
 
@@ -103,8 +99,7 @@ def average_precision(
 def calculate_map(
     users: List[Union[str, int]],
     rankings: List[List[Union[str, int]]],
-    item_relevances: List[Dict[Union[str, int], float]],
-    neutral_rating: float = 0.0,
+    item_relevances: List[Dict[Union[str, int], float]]
 ) -> float:
     """
     Compute Mean Average Precision (MAP) over users.
@@ -113,7 +108,6 @@ def calculate_map(
         users: List of user IDs.
         rankings: List of ranked item lists per user.
         item_relevances: List of dictionaries mapping item IDs to relevance scores.
-        neutral_rating: Threshold above which items are considered relevant.
 
     Returns:
         float: MAP score.
@@ -121,7 +115,7 @@ def calculate_map(
     ap_scores = []
 
     for u in range(len(users)):
-        ap = average_precision(rankings[u], item_relevances[u], neutral_rating)
+        ap = average_precision(rankings[u], item_relevances[u])
         ap_scores.append(ap)
 
     return np.mean(ap_scores)
@@ -137,7 +131,6 @@ def dcg_at_k(relevances: List[float], k: int) -> float:
 def ndcg_at_k_single_user(
     ranked_items: List[Union[str, int]],
     item_relevance: Dict[Union[str, int], float],
-    neutral_rating: float = 0.0,
     k: int = 10,
 ) -> float:
     """
@@ -146,17 +139,16 @@ def ndcg_at_k_single_user(
     Args:
         ranked_items: Ranked list of items.
         item_relevance: Dictionary of item -> relevance score.
-        neutral_rating: Relevance threshold.
         k: Truncation level.
 
     Returns:
         float: NDCG@k score.
     """
-    true_relevances = [item_relevance.get(item, -1) > neutral_rating for item in ranked_items]
+    true_relevances = [item_relevance.get(item, 0) > 0 for item in ranked_items]
     dcg = dcg_at_k(true_relevances, k)
 
     sorted_relevances = sorted(item_relevance.values(), reverse=True)
-    ideal_relevances = [rel > neutral_rating for rel in sorted_relevances]
+    ideal_relevances = [rel > 0 for rel in sorted_relevances]
     idcg = dcg_at_k(ideal_relevances, k)
 
     return dcg / idcg if idcg > 0 else 0.0
@@ -166,7 +158,6 @@ def calculate_ndcg(
     users: List[Union[str, int]],
     rankings: List[List[Union[str, int]]],
     item_relevances: List[Dict[Union[str, int], float]],
-    neutral_rating: float = 0.0,
     k: int = 10,
 ) -> float:
     """
@@ -176,7 +167,6 @@ def calculate_ndcg(
         users: List of user IDs.
         rankings: List of ranked items per user.
         item_relevances: List of relevance score dictionaries per user.
-        neutral_rating: Threshold for relevance.
         k: Truncation level.
 
     Returns:
@@ -185,7 +175,7 @@ def calculate_ndcg(
     ndcgs = []
 
     for u in range(len(users)):
-        ndcg = ndcg_at_k_single_user(rankings[u], item_relevances[u], neutral_rating, k)
+        ndcg = ndcg_at_k_single_user(rankings[u], item_relevances[u], k)
         ndcgs.append(ndcg)
 
     return np.mean(ndcgs)
@@ -194,8 +184,7 @@ def calculate_ndcg(
 def calculate_mrr(
     users: List[Union[str, int]],
     rankings: List[List[Union[str, int]]],
-    item_relevances: List[Dict[Union[str, int], float]],
-    neutral_rating: float = 0.0,
+    item_relevances: List[Dict[Union[str, int], float]]
 ) -> float:
     """
     Compute Mean Reciprocal Rank (MRR) over all users.
@@ -204,7 +193,6 @@ def calculate_mrr(
         users: List of user IDs.
         rankings: Ranked item lists per user.
         item_relevances: Relevance score dicts per user.
-        neutral_rating: Relevance threshold.
 
     Returns:
         float: MRR score.
@@ -213,7 +201,7 @@ def calculate_mrr(
 
     for u in range(len(users)):
         for rank, item in enumerate(rankings[u], start=1):
-            if item_relevances[u].get(item, -1) > neutral_rating:
+            if item_relevances[u].get(item, 0) > 0:
                 reciprocal_ranks.append(1 / rank)
                 break
         else:
@@ -226,7 +214,6 @@ def hit_ratio_at_k(
     users: List[Union[str, int]],
     rankings: List[List[Union[str, int]]],
     item_relevances: List[Dict[Union[str, int], float]],
-    neutral_rating: float = 0.0,
     k: int = 10,
 ) -> float:
     """
@@ -236,7 +223,6 @@ def hit_ratio_at_k(
         users: List of user IDs.
         rankings: Ranked item lists per user.
         item_relevances: Relevance scores per user.
-        neutral_rating: Relevance threshold.
         k: Number of top items to consider.
 
     Returns:
@@ -248,7 +234,7 @@ def hit_ratio_at_k(
         top_k_items = rankings[u][:k]
         user_relevances = item_relevances[u]
 
-        hit = any(user_relevances.get(item, -1) > neutral_rating for item in top_k_items)
+        hit = any(user_relevances.get(item, 0) > 0 for item in top_k_items)
         hits.append(1.0 if hit else 0.0)
 
     return np.mean(hits)
@@ -258,7 +244,6 @@ def precision_at_k(
     users: List[Union[str, int]],
     rankings: List[List[Union[str, int]]],
     item_relevances: List[Dict[Union[str, int], float]],
-    neutral_rating: float = 0.0,
     k: int = 10,
 ) -> float:
     """
@@ -268,7 +253,6 @@ def precision_at_k(
         users: List of user IDs.
         rankings: List of ranked item lists for each user.
         item_relevances: List of dictionaries mapping item IDs to relevance scores.
-        neutral_rating: Threshold above which an item is considered relevant.
         k: Number of top items to consider.
 
     Returns:
@@ -281,7 +265,7 @@ def precision_at_k(
         user_relevances = item_relevances[u]
 
         relevant_count = sum(
-            user_relevances.get(item, -1) > neutral_rating for item in top_k_items
+            user_relevances.get(item, 0) > 0 for item in top_k_items
         )
         precision = relevant_count / k
         precisions.append(precision)
@@ -293,7 +277,6 @@ def recall_at_k(
     users: List[Union[str, int]],
     rankings: List[List[Union[str, int]]],
     item_relevances: List[Dict[Union[str, int], float]],
-    neutral_rating: float = 0.0,
     k: int = 10,
 ) -> float:
     """
@@ -303,7 +286,6 @@ def recall_at_k(
         users: List of user IDs.
         rankings: Ranked item lists per user.
         item_relevances: Relevance score dicts per user.
-        neutral_rating: Relevance threshold.
         k: Truncation level.
 
     Returns:
@@ -316,7 +298,7 @@ def recall_at_k(
         user_relevances = item_relevances[u]
 
         # Set of relevant items for this user
-        relevant_items = {item for item, score in user_relevances.items() if score > neutral_rating}
+        relevant_items = {item for item, rel in user_relevances.items() if rel > 0}
 
         if not relevant_items:
             recalls.append(0.0)

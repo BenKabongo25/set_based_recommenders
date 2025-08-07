@@ -186,11 +186,8 @@ class TagBaseRecommender:
             num = item_tag_weight + mu * (n_tag_items_count / n_items)
             denom = mu + n_items / n_tag_items_count
             tag_score = np.log(num/denom)
-
-            if user_tag_weight >= 0:
-                score += user_tag_weight * tag_score
-            else:
-                score -= np.abs(user_tag_weight) * tag_score
+            
+            score += user_tag_weight * tag_score
 
         return score
 

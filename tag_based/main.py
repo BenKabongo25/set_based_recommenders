@@ -31,31 +31,45 @@ def main(config):
     )
     recommender.fit()
 
-    data_df = pd.concat([train_df, test_df], ignore_index=True)
-    all_items = data_df[config.item_column].unique().tolist()
+    # Training/Items evaluation
+    # https://dl.acm.org/doi/10.1145/2043932.2043996
 
     users = []
+    selected_items = []
     item_relevances = []
 
-    grouped_df = data_df.groupby(config.user_column)
-    for user_id, user_df in grouped_df:
-        items = user_df[config.item_column].tolist()
-        ratings = user_df[config.rating_column].apply(lambda x: normalize_overall_rating(x)).tolist()
-        items_ratings = {item: rating for item, rating in zip(items, ratings)}
+    train_items = train_df[config.item_column].unique().tolist()
+    grouped_train_df = train_df.groupby(config.user_column)
+    grouped_test_df = test_df.groupby(config.user_column)
+
+    for user_id in grouped_train_df.groups.keys():
+        user_train_df = grouped_train_df.get_group(user_id)
+        excluded_items = user_train_df[config.item_column].tolist()
+        user_selected_items = set(train_items) - set(excluded_items)
+        user_selected_items = list(user_selected_items)
+
+        user_test_df = None
+        user_item_relevances = {}
+        if user_id in grouped_test_df.groups.keys():
+            user_test_df = grouped_test_df.get_group(user_id)
+            test_items = user_test_df[config.item_column].tolist()
+            test_relevances = user_test_df[config.rating_column].apply(lambda x: max(0, x - 2)).tolist()
+            user_item_relevances = {
+                item: rating 
+                for item, rating in zip(test_items, test_relevances) 
+                if item in train_items
+            }
 
         users.append(user_id)
-        item_relevances.append(items_ratings)
+        selected_items.append(user_selected_items)
+        item_relevances.append(user_item_relevances)
 
-    rankings = recommender.rank_all(
-        users=users,
-        items=[all_items] * len(users),
-    )
+    rankings = recommender.rank_all(users=users, items=selected_items)
 
     test_scores = evaluate_ranking_metrics(
         users=users,
         rankings=rankings,
         item_relevances=item_relevances,
-        neutral_rating=config.neutral_rating,
         ks=[5, 10, 20],
     )
     print("Evaluation Results:")
