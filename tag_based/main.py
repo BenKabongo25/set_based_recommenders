@@ -9,12 +9,35 @@ import os
 import pandas as pd
 
 from recommender import TagBaseRecommender
-from utils import normalize_overall_rating, evaluate_ranking_metrics
+from utils import evaluate_ranking_metrics, normalize_overall_rating, prepare_full_ranking_data
 
 
 def main(config):
     train_df = pd.read_csv(config.train_data_path)
     test_df = pd.read_csv(config.test_data_path)
+    train_df[config.tag_column] = train_df[config.tag_column].apply(ast.literal_eval)
+
+    if config.use_clustered_tags:
+        save_dir = os.path.join(config.output_dir, "w_clusters")
+            
+        all_tags = list(json.load(open(config.all_tags_path, 'r'))) # {"t": freq}
+        selected_tags_index = json.load(open(config.selected_tags_index_path, 'r')) # ["t1", "t2", ...]
+        tag2cluster_index = json.load(open(config.tag2cluster_index_path, 'r')) # {"t1": c1, t2: c2, ...}
+
+        def process_tags(tag_set):
+            cluster_set = set()
+            for tag_index in tag_set:
+                if tag_index not in selected_tags_index:
+                    continue
+                tag = all_tags[tag_index]
+                if tag in tag2cluster_index:
+                    cluster_set.add(tag2cluster_index[tag])
+            return list(cluster_set)
+
+        train_df[config.tag_column] = train_df[config.tag_column].apply(process_tags)
+
+    else:
+        save_dir = os.path.join(config.output_dir, "wo_clusters")
 
     recommender = TagBaseRecommender(
         mu=config.mu,
@@ -26,63 +49,36 @@ def main(config):
         users=train_df[config.user_column].tolist(),
         items=train_df[config.item_column].tolist(),
         ratings=train_df[config.rating_column].apply(lambda x: normalize_overall_rating(x)).tolist(),
-        tags=train_df[config.tag_column].apply(ast.literal_eval).tolist(),
+        tags=train_df[config.tag_column].tolist(),
         tag_ratings=None
     )
     recommender.fit()
 
-    # Training/Items evaluation
-    # https://dl.acm.org/doi/10.1145/2043932.2043996
+    os.makedirs(save_dir, exist_ok=True)
+    config_path = os.path.join(save_dir, "config.json")
+    with open(config_path, "w") as f:
+        json.dump(vars(config), f, indent=4)
 
-    users = []
-    selected_items = []
-    item_relevances = []
-
-    train_items = train_df[config.item_column].unique().tolist()
-    grouped_train_df = train_df.groupby(config.user_column)
-    grouped_test_df = test_df.groupby(config.user_column)
-
-    for user_id in grouped_train_df.groups.keys():
-        user_train_df = grouped_train_df.get_group(user_id)
-        excluded_items = user_train_df[config.item_column].tolist()
-        user_selected_items = set(train_items) - set(excluded_items)
-        user_selected_items = list(user_selected_items)
-
-        user_test_df = None
-        user_item_relevances = {}
-        if user_id in grouped_test_df.groups.keys():
-            user_test_df = grouped_test_df.get_group(user_id)
-            test_items = user_test_df[config.item_column].tolist()
-            test_relevances = user_test_df[config.rating_column].apply(lambda x: max(0, x - 2)).tolist()
-            user_item_relevances = {
-                item: rating 
-                for item, rating in zip(test_items, test_relevances) 
-                if item in train_items
-            }
-
-        users.append(user_id)
-        selected_items.append(user_selected_items)
-        item_relevances.append(user_item_relevances)
+    print("Full ranking evaluation:")
+    users, selected_items, item_relevances = prepare_full_ranking_data(
+        config=config,
+        train_df=train_df,
+        test_df=test_df,
+        eval_df=None,  # No evaluation data provided
+    )
 
     rankings = recommender.rank_all(users=users, items=selected_items)
-
     test_scores = evaluate_ranking_metrics(
         users=users,
         rankings=rankings,
         item_relevances=item_relevances,
-        ks=[5, 10, 20],
+        ks=[5, 10, 20, 50, 100],
     )
-    print("Evaluation Results:")
     for metric, score in test_scores.items():
-        print(f"{metric}: {score:.4f}")
+        print(f"{metric}: {score:.6f}")
 
-    os.makedirs(config.output_dir, exist_ok=True)
-    config_path = f"{config.output_dir}/config.json"
-    with open(config_path, "w") as f:
-        json.dump(vars(config), f, indent=4)
-
-    res_path = f"{config.output_dir}/results.json"
-    with open(res_path, "w") as f:
+    full_res_path = os.path.join(save_dir, "results_full.json")
+    with open(full_res_path, "w") as f:
         json.dump(test_scores, f, indent=4)
 
 
@@ -108,6 +104,31 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--use_clustered_tags",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to use clustered tags in the recommender.",
+    )
+    parser.add_argument(
+        "--all_tags_path",
+        type=str,
+        default=None,
+        help="Path to the file containing all tags.",
+    )
+    parser.add_argument(
+        "--selected_tags_index_path",
+        type=str,
+        default=None,
+        help="Path to the file containing selected tags index.",
+    )
+    parser.add_argument(
+        "--tag2cluster_index_path",
+        type=str,
+        default=None,
+        help="Path to the file containing tag to cluster index mapping.",
+    )
+
+    parser.add_argument(
         "--mu",
         type=float,
         default=0.0,
@@ -130,6 +151,19 @@ if __name__ == "__main__":
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Whether to use item priors in the recommender.",
+    )
+
+    parser.add_argument(
+        "--n_negative_per_positive",
+        type=int,
+        default=99,
+        help="Number of negative items per positive item for sampling.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility.",
     )
 
     parser.add_argument(

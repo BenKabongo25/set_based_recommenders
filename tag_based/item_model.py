@@ -82,7 +82,7 @@ class ItemModel:
         """
         Fit the item model by computing tag weights and pairwise tag weights.
         """
-        ratings = np.ndarray(list(self.user_ratings.values()))
+        ratings = np.array(list(self.user_ratings.values()))
         self.n_pos_ratings = np.sum(ratings >= self.neutral_rating)
         self.n_neg_ratings = np.sum(ratings < self.neutral_rating)
 

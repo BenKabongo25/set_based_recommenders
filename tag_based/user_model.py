@@ -3,7 +3,7 @@
 
 
 import numpy as np
-from typing import List, Union
+from typing import Dict, List, Tuple, Union
 
 
 class UserModel:
@@ -53,12 +53,14 @@ class UserModel:
         self.tag_coverages      = {}
         self.tag_significances  = {}
         self.tag_utilies        = {}
+        self.tag_n_items        = {}
 
         self.pairwise_tag_weights       = {}  # (tag_id_1, tag_id_2): x
         self.pairwise_tag_ratings       = {}
         self.pairwise_tag_coverages     = {}
         self.pairwise_tag_significances = {}
         self.pairwise_tag_utilies       = {}
+        self.pairwise_tag_n_items       = {}
 
     def add_interaction(
         self,
@@ -126,7 +128,7 @@ class UserModel:
             float: Significance value, which is the minimum of 2 and the ratio of absolute weight to
                    the adjusted standard deviation.
         """
-        return min(2, np.abs(weight) / (std + 1e-6 / np.sqrt(n_items)))
+        return min(2, np.abs(weight) / (std / (np.sqrt(n_items) + 1e-12) + 1e-12))
 
     def fit(self) -> None:
         """
@@ -137,7 +139,7 @@ class UserModel:
         for tag_a, tag_interaction_ratings_a in self.tag_interaction_ratings.items():
             n_tag_a_items = len(tag_interaction_ratings_a)
 
-            tag_ratings_a = np.ndarray(list(tag_interaction_ratings_a.values()))
+            tag_ratings_a = np.array(list(tag_interaction_ratings_a.values()))
             tag_rating_a = np.mean(tag_ratings_a)
             tag_std_a = np.std(tag_ratings_a)
             tag_weight_a = tag_rating_a - self.neutral_rating
@@ -150,6 +152,7 @@ class UserModel:
             self.tag_coverages[tag_a] = tag_coverage_a
             self.tag_significances[tag_a] = tag_significance_a
             self.tag_utilies[tag_a] = tag_utility_a
+            self.tag_n_items[tag_a] = n_tag_a_items
 
             if not self.use_pairwise_tags:
                 continue
@@ -163,9 +166,9 @@ class UserModel:
                 if n_common_tag_items == 0:
                     continue
 
-                filtered_ratings_a = np.ndarray([tag_interaction_ratings_a[item_id] for item_id in common_tag_items])
-                filtered_ratings_b = np.ndarray([tag_interaction_ratings_b[item_id] for item_id in common_tag_items])
-                pairwise_ratings = np.ndarray((filtered_ratings_a + filtered_ratings_b) / 2)
+                filtered_ratings_a = np.array([tag_interaction_ratings_a[item_id] for item_id in common_tag_items])
+                filtered_ratings_b = np.array([tag_interaction_ratings_b[item_id] for item_id in common_tag_items])
+                pairwise_ratings = np.array((filtered_ratings_a + filtered_ratings_b) / 2)
 
                 pairwise_rating = np.mean(pairwise_ratings)
                 pairwise_std = np.std(pairwise_ratings)
@@ -179,3 +182,99 @@ class UserModel:
                 self.pairwise_tag_coverages[(tag_a, tag_b)] = pairwise_coverage
                 self.pairwise_tag_significances[(tag_a, tag_b)] = pairwise_significance
                 self.pairwise_tag_utilies[(tag_a, tag_b)] = pairwise_utility
+                self.pairwise_tag_n_items[(tag_a, tag_b)] = n_common_tag_items
+
+    def _compute_conditional_utility(
+        self,
+        tag: Union[str, int],
+        weights: Dict[Union[str, int], float],
+        significances: Dict[Union[str, int], float],
+        n_items: Dict[Union[str, int], int],
+        n_selected_items: int
+    ) -> float:
+        """
+        Compute the conditional utility of a tag based on its weight, significance, and number of items.
+
+        Args:
+            tag (Union[str, int]): The ID of the tag.
+            weights (Dict[Union[str, int], float]): Dictionary mapping tag IDs to their weights.
+            significances (Dict[Union[str, int], float]): Dictionary mapping tag IDs to their significances.
+            n_items (Dict[Union[str, int], int]): Dictionary mapping tag IDs to the number of items rated with that tag.
+            n_selected_items (int): Number of items for selected tags.
+
+        Returns:
+            float: Conditional utility value for the specified tag.
+        """
+        tag_weight = weights[tag]
+        tag_significance = significances[tag]
+        n_tag_items = n_items[tag]
+        tag_coverage = self._compute_coverage(n_tag_items / n_selected_items, len(self.item_ratings))
+        tag_utility = tag_coverage * tag_significance * np.abs(tag_weight)
+        return tag_utility
+    
+    def topk_tags(
+        self,
+        k: int = 10
+    ) -> List[Union[str, int]]:
+        selected_tags = set()
+        unique_selected_tags = set()
+
+        tag_utilities = self.tag_utilies.copy()
+        if self.use_pairwise_tags:
+            tag_utilities.update(self.pairwise_tag_utilies)
+
+        sorted_tags = sorted(tag_utilities.items(), key=lambda x: x[1], reverse=True)
+        if len(sorted_tags) > 0:
+            tag = sorted_tags[0][0]
+            selected_tags.add(tag)
+            if type(tag) is tuple:
+                unique_selected_tags.update(tag)
+            else:
+                unique_selected_tags.add(tag)
+
+        n_items = len(self.item_ratings)
+        for _ in range(k - 1):
+            selected_tag_items = set()
+            for tag in unique_selected_tags:
+                selected_tag_items.update(self.tag_interaction_ratings.get(tag, {}).keys())
+            n_selected_tag_items = len(selected_tag_items)
+
+            utilities = {}
+            for tag in self.tag_weights:
+                if tag in selected_tags:
+                    continue
+                utilities[tag] = self._compute_conditional_utility(
+                    tag,
+                    self.tag_weights,
+                    self.tag_significances,
+                    self.tag_n_items,
+                    n_selected_tag_items
+                )
+
+            if not self.use_pairwise_tags:
+                continue
+
+            for tag in self.pairwise_tag_weights:
+                if tag in selected_tags:
+                    continue
+                utilities[tag] = self._compute_conditional_utility(
+                    tag,
+                    self.pairwise_tag_weights,
+                    self.pairwise_tag_significances,
+                    self.pairwise_tag_n_items,
+                    n_selected_tag_items
+                )
+
+            if len(utilities) == 0:
+                break
+
+            sorted_utilities = sorted(utilities.items(), key=lambda x: x[1], reverse=True)
+            tag = sorted_utilities[0][0]
+            selected_tags.add(tag)
+            if type(tag) is tuple:
+                unique_selected_tags.update(tag)
+            else:
+                unique_selected_tags.add(tag)
+
+        return list(selected_tags)
+    
